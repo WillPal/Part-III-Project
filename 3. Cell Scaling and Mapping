@@ -1,0 +1,74 @@
+####################################
+##### Cell Scaling and Mapping #####
+####################################
+
+### E.bar obtained from Postional Information script
+landmark.cells <- cells[cells$ensembl %in% rownames(E.bar),] 
+landmark.cells <- landmark.cells[order(landmark.cells$ensembl),]
+landmark.cells$ensembl <- as.character(landmark.cells$ensembl)
+rownames(landmark.cells) <- NULL
+landmark.cells <- column_to_rownames(landmark.cells, "ensembl")
+landmark.Ebar <- E.bar
+landmark.Ebar <- as.matrix(landmark.Ebar)
+
+#### Scaling
+K <- 5
+J <- 5
+logic <- vector(length=ncol(landmark.cells))
+for (i in 1:ncol(landmark.cells)){
+  logic[i] <- mean(landmark.cells[,i] == 0) <= 0.75 ### Only considering cells expression > 
+                                                    ### 25% of landmark genes
+}
+exp <- landmark.cells[,logic]
+measure <- c()
+quant <- matrix(NA,nrow = nrow(exp), ncol = 42)
+for (i in 1:nrow(exp)){
+  c <- exp[i,]
+  c <- c[which(c >= 1)] #Cells expressing the landmark gene
+  quant[i,1:21] <- quantile(c, c(seq(from=0,to=1,by=0.05))) ### Looking at every 5th percentile
+  
+  t <- landmark.Ebar[i,]
+  t <- t[which(t >= 1)]
+  quant[i,22:42] <- quantile(t, c(seq(from=0,to=1,by=0.05)))
+}
+exp.c <- exp
+for (i in 1:nrow(exp.c)){ 
+  exp.c[i,] <- exp.c[i,] * (quant[i,32+K]-quant[i,32-K])/(quant[i,11+K]-quant[i,11-K]) ### Scaling by ratio of third quartiles
+  quant[i,1:11] <- quantile(exp.c[i,][exp.c[i,]>0], c(seq(from=0,to=1,by=0.1)))
+  exp.c[i,][exp.c[i,]>0] <- exp.c[i,][exp.c[i,]>0] + (quant[i,22+J]-quant[i,1+J]) ### Addition of difference between lower quartiles
+}
+H <- apply(landmark.Ebar,2,function(y){(y-min(y))/(max(y)-min(y))})
+dimnames(H) <- dimnames(landmark.Ebar)
+G <- apply(exp.c,2,function(y){(y-min(y))/(max(y)-min(y))})
+dimnames(G) <- dimnames(exp.c)
+
+#### Cell mapping
+### Mapping for maximum Spearman's RCC 
+corrhist <- function(a,b,c,d){
+  y <- c()
+  corr <- matrix(NA,nrow = ncol(b), ncol = ncol(a))
+  for (i in 1:ncol(b)){
+    corr[i,] <- cor(a, b[,i], method = c)
+  }
+  hist(max.col(corr), nclass= 100, main = paste(d,",",c))
+  return(corr)
+}
+X <- corrhist(H,G,"spearman","")
+rownames(X) <- colnames(exp.c)
+Y <- apply(X,1,max) ### Examining maximum RCC calculated for each cell
+summary(Y)
+
+### Filter step, for range > 0.15 it was noticed that the RCCs for many cells were disproportionately 
+### low for the edge sections - these sections were therefore not considered when examining the range of 
+### RCC values
+a <- c()
+for (i in 1:nrow(X)){
+  if ((max(X[i,])-min(X[i,-c(1:5,95:100)]))>0.15 & max(X[i,])>0.4){
+    a <- c(a,i)
+  }
+}
+length(a)
+### Final RCCs for all cells, maximum RCCs correspond to where the cell is assigned
+RCC.Cells <- X[a,]
+qqq <- c(max.col(RCC.Cells),1:100) %>% table() - 1
+barplot(qqq)
