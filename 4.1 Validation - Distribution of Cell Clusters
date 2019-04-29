@@ -1,0 +1,34 @@
+####################################################################
+#### Validation Step - Examining Distributions of Cell Clusters ####
+####################################################################
+
+#### ValidStep - Look where cells from particular clusters are assigned!
+### Reading in clusternames and ids
+x <- read.csv(gzfile("Project/GSE112294_ClusterNames.csv.gz"))
+y <- read.table(gzfile("Project/GSM3067194_18hpf_clustID.txt.gz"))
+
+#### Combining mapped cells with their clusterIDs
+z <- data.frame(Cell = colnames(sc18hpf), ClustID = y[,1])
+D <- RCC.Cells %>% as.data.frame %>% rownames_to_column("Cell") %>% inner_join(z, by = "Cell") %>% column_to_rownames("Cell")
+cellclust <- data.frame(Cell = rownames(D), ClusterID = D[,ncol(D)]) %>% inner_join(x, by = "ClusterID")
+cellclust$ClusterName <- factor(cellclust$ClusterName)
+table(cellclust$ClusterName)
+
+#### Exploring the distribution of cell whose assigned clusters contain the words
+#### "tailbud", "neural", "telencephalon", "midbrain" or "hindbrain"
+
+locations <- c("tailbud","midbrain","hindbrain","neural", "telencephalon")
+par(mfrow=c(2,2))
+for (i in 1:length(locations)){
+  clust <- cellclust[str_which(as.character(cellclust$ClusterName), locations[i]),]
+  clust.corr <- RCC.Cells[rownames(RCC.Cells)%in%clust$Cell,]
+  qqq <- c(max.col(clust.corr),1:100) %>% table() - 1
+  barplott <- data.frame(Section = 1:100, Number = (qqq %>% as.numeric()))
+  p<-ggplot(data=barplott, aes(x=Section, y=Number)) +
+    geom_bar(stat = "identity", width = 0.85, color = "blue", fill = "grey") + theme_classic() +
+    theme(text = element_text(size = 30), panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank()) + ylab("No. of cells assigned") + xlab("TOMO-seq Section No.") +
+    ggtitle(paste(locations[i]))
+  print(p)
+}
+

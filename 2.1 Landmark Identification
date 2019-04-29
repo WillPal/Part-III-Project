@@ -1,0 +1,87 @@
+###########################################
+###### Landmark Gene Identification #######
+###########################################
+
+##############################################
+### Code for SpatialDE to be run using Python (need to un-comment):
+### Packages will need to be installed
+
+#cd Project
+#import numpy as np
+#import pandas as pd
+#import NaiveDE 
+#import SpatialDE
+#sample_info1 = pd.read_csv('Landmark_genes/sample_info.eucl.csv', index_col=0)
+#df1 = pd.read_csv('tomo_average.eucl.csv', index_col=0)
+#X1 = sample_info1[['Section']]
+#dfm1 = NaiveDE.stabilize(df1)
+#res1 = NaiveDE.regress_out(sample_info1, dfm1, 'np.log(Sum)').T
+#results1 = SpatialDE.run(X1, res1)
+#results1.to_csv('Landmark_genes/eucl_spatialDE_results.csv')
+##############################################
+
+spatialDE.eucl <- read.csv("Project/Landmark_genes/eucl_spatialDE_results.csv")
+dim(spatialDE.eucl)
+summary(spatialDE.eucl)
+SV_genes <- spatialDE.eucl %>% 
+  dplyr::filter(qval <= 0.05)
+df <- tomo_average.eucl[rownames(tomo_average.eucl) %in% SV_genes$g,]
+dim(df)
+## Applying a moving average, as performed in Junker et al. 2014
+df <- t(movingAverageByCol(t(df), width = 3, full.length = T))
+colnames(df) <- 1:100
+## Z-score transformation to scale genes
+df <- t(apply(df,1,scale))
+colnames(df) <- 1:100
+
+############################################
+##### Gap Statistics
+set.seed(123)
+fviz_nbclust(df, kmeans, method = "gap_stat", nboot = 500)+
+  labs(subtitle = "Gap statistic method")
+
+############################################
+### K-means, heatmapping
+### Get some nicer colours
+k <- 6 ### Number obtained using gap statistics
+
+
+mypalette <- brewer.pal(11, "RdYlBu")
+morecols <- colorRampPalette(mypalette)
+set.seed(43)
+km_genes <- kmeans(df, centers = k)
+df01 <- apply(df,1,function(y){(y-min(y))/(max(y)-min(y))}) %>% t() ### optional [0,1] scaling
+heatmap.2(as.matrix(df01[order(km_genes$cluster),]),
+          col=rev(morecols(50)),
+          trace="none",
+          main = "Insert title here", 
+          dendrogram="none", Colv = FALSE, Rowv = FALSE, labRow = "",
+          density.info = "none" )
+
+############################################
+####### Getting datasets of different clusters
+x <- as.vector(km_genes$cluster)
+dat <- cbind(df, Class=x)
+rownames(dat) <- rownames(df)
+dat <- dat[order(dat[,'Class']),]
+dat <- as.data.frame(dat)
+
+############################################
+######## Refining landmark genes using PCA
+top_genes <- c()
+for (i in 1:max(dat$Class)){
+  X <- dat %>%
+    rownames_to_column("ensembl") %>%
+    dplyr::filter(Class == i) %>% 
+    column_to_rownames("ensembl")
+  X <- X[,-101]
+  pcDat <- prcomp(t(X))
+  top <- abs(pcDat$rotation)
+  rownames(top) <- 1:nrow(top)
+  top <- top[order(top[,1], decreasing = T),]
+  top_genes <- c(top_genes, rownames(X)[
+    as.numeric(rownames(top)[1:8])]) #### Number of genes to select here indicated by
+                                     #### the results from the exploration of postional
+                                     #### information
+}
+top_genes <- top_genes[!is.na(top_genes)]

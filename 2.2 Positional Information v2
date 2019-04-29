@@ -1,0 +1,142 @@
+##########################################
+#### Exploring Positional Information ####
+##########################################
+
+### Exploring the top genes as obtained during landmark gene identification
+### - getting data from the three samples
+E1 <- t2h.adj[rownames(t2h.adj) %in% top_genes,] 
+E1 <- t(movingAverageByCol(t(E1), width = 3, full.length = TRUE)) #Applying moving average
+colnames(E1) <- 1:100
+E2 <- h2t.adj[rownames(h2t.adj) %in% top_genes,]
+E2 <- t(movingAverageByCol(t(E2), width = 3, full.length = TRUE))
+colnames(E2) <- 1:100
+E3 <- t2h2.adj[rownames(t2h2.adj) %in% top_genes,]
+E3 <- t(movingAverageByCol(t(E3), width = 3, full.length = TRUE))
+colnames(E3) <- 1:100
+
+### Need to obtain a mean trace for each gene (same as the combined embryo created in Early Processing, but with
+### a moving average applied)
+
+E1.1 <- rownames_to_column(as.data.frame(E1), "ensembl")
+E2.1 <- rownames_to_column(as.data.frame(E2), "ensembl")
+E3.1 <- rownames_to_column(as.data.frame(E3), "ensembl")
+E.all <- rbind(E1.1,E2.1,E3.1)
+E.bar <- matrix(NA,ncol=100,nrow=length(top_genes))
+for (i in 1:length(top_genes)){
+  temp <- E.all %>% 
+    dplyr::filter(ensembl == top_genes[i])
+  temp <- temp[,-1] %>% 
+    apply(2,mean)
+  E.bar[i,] <- temp
+}
+rownames(E.bar) <- top_genes
+E.bar <- as.data.frame(E.bar)
+
+### Ensuring the rownames are ordered correctly
+E1 <- rownames_to_column(as.data.frame(E1), "ensembl")
+E1[,"ensembl"] <- as.factor(E1[,"ensembl"])
+E1 <- E1[order(E1[,"ensembl"]),]
+rownames(E1) <- E1$ensembl
+E1 <- E1[,-1]
+E2 <- rownames_to_column(as.data.frame(E2), "ensembl")
+E2[,"ensembl"] <- as.factor(E2[,"ensembl"])
+E2 <- E2[order(E2[,"ensembl"]),]
+rownames(E2) <- E2$ensembl
+E2 <- E2[,-1]
+E3 <- rownames_to_column(as.data.frame(E3), "ensembl")
+E3[,"ensembl"] <- as.factor(E3[,"ensembl"])
+E3 <- E3[order(E3[,"ensembl"]),]
+rownames(E3) <- E3$ensembl
+E3 <- E3[,-1]
+E.bar <- rownames_to_column(as.data.frame(E.bar), "ensembl")
+E.bar[,"ensembl"] <- as.factor(E.bar[,"ensembl"])
+E.bar <- E.bar[order(E.bar[,"ensembl"]),]
+rownames(E.bar) <- E.bar$ensembl
+E.bar <- E.bar[,-1]
+colnames(E.bar) <- 1:100
+
+## Obtaining the standard deviations!
+E1.1 <- rownames_to_column(as.data.frame(E1), "ensembl")
+E2.1 <- rownames_to_column(as.data.frame(E2), "ensembl")
+E3.1 <- rownames_to_column(as.data.frame(E3), "ensembl")
+E.all <- rbind(E1.1,E2.1,E3.1)
+E.sd <- matrix(NA,ncol=100,nrow=length(top_genes))
+for (i in 1:length(top_genes)){
+  temp <- E.all %>% 
+    dplyr::filter(ensembl == rownames(E1)[i])
+  temp <- temp[,-1] %>% 
+    apply(2,sd)
+  E.sd[i,] <- temp
+}
+rownames(E.sd) <- rownames(E1)
+E.sd <- as.data.frame(E.sd)
+colnames(E.sd) <- 1:100
+
+### Getting the covariance matrix
+C <- cov(t(E.bar))
+invC <- solve(C)
+
+### Fitting a trace to each landmark gene to obtain its gradient
+
+gradients <- matrix(nrow=nrow(E.bar),ncol=100)
+for (j in 1:nrow(E.bar)){
+X <- as.numeric(1:100)
+Y <- as.numeric(E.bar[j,])
+m <- lm(Y ~ poly(X,40,raw=TRUE))  #### A high polynomial degree was found to be necessary
+d <- m$coefficients
+power <- c() ### Obtaining the indices for the non NA coefficients
+for (i in 1:40){
+  if (is.na(d[1+i])==FALSE){
+    power <- c(power,i)
+  }
+} ### Power gives a list of X^power which has a non-NA coefficient - aids in differentiation
+
+### Calculation of gradient via differentiation
+grad <- vector(length=100)
+for(i in 1:length(power)){
+  test <- d[power+1]*power
+  grad <- grad + (test[i]*X^(power[i]-1))
+}
+gradients[j,] <- grad
+}
+
+E.grad <- gradients
+
+dimnames(E.grad) <- dimnames(E.grad)
+E.grad.abs <- abs(E.grad)
+
+#Plotting for sd(x) - positionl error for individual genes - optional
+#sigmax <- 1/(E.grad.abs * (1/(E.sd)))
+#par(mfrow=c(3,3))
+#for (i in 1:nrow(E.grad.abs)){
+#  plot(x=1:100, y = sigmax[i,], type = "l", ylim = c(0,10))
+#  abline(h=1, col = 'red')
+#}
+
+### Postional error for the combined gene set
+### Following the equations described in Dubuis et al. 2013
+joint_sigmax <- rep(0,100)
+count = 0
+for (i in 1:nrow(E.grad.abs)){
+  for (j in 1:nrow(E.grad.abs)){
+    temp <- E.grad.abs[i,] * invC[i,j] * E.grad.abs[j,]
+    count = count + 1
+    print(count)
+    joint_sigmax <- joint_sigmax + temp
+  }
+}
+joint_sigmax <- 1/joint_sigmax
+joint_sigmax <- sqrt(joint_sigmax)
+
+### Plot
+par(mfrow=c(1,1))
+plot(x=1:100, y=joint_sigmax, type = "l", ylim = c(0,3))
+abline(h=0.5)
+
+#### Alternative plotting using ggplot
+df2 <- data.frame(Section = 1:100, Sigmax = joint_sigmax)
+df2 %>%  ggplot(aes(x = Section, y = joint_sigmax)) + geom_line(color = "forestgreen", size = 1.5) +
+  theme_grey() + xlab("TOMO-seq Section No.") + ylab("Sigmax") + 
+  theme(text = element_text(size = 30), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) + ylim(0,2) + geom_hline(yintercept = 0.5, linetype = "dashed",
+                                                                     color = "red", size = 1.5)
